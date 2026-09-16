@@ -1,0 +1,482 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>BilKoll</RootNamespace>
+    <AssemblyName>BilKoll</AssemblyName>
+  </PropertyGroup>
+
+</Project>
+namespace BilKoll
+{
+    internal static class Program
+    {
+        [STAThread]
+        static void Main()
+        {
+            Application.SetHighDpiMode(HighDpiMode.SystemAware);
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            Application.Run(new MainForm());
+        }
+    }
+}
+namespace BilKoll
+{
+    public class GarageData
+    {
+        public string RegNr { get; set; } = "";
+        public int Matarstallning { get; set; } = 0;
+        public DateTime SenasteOljebyte { get; set; } = DateTime.Today;
+        public int OljebytesIntervallManader { get; set; } = 12;
+    }
+
+    public class DackData
+    {
+        public DateTime SenasteDackbyte { get; set; } = DateTime.Today;
+        public string SenasteSasong { get; set; } = "Sommardäck";
+    }
+
+    public class TullPost
+    {
+        public DateTime Datum { get; set; } = DateTime.Today;
+        public decimal Belopp { get; set; } = 0;
+        public string Kommentar { get; set; } = "";
+    }
+
+    public class AppData
+    {
+        public GarageData Garage { get; set; } = new();
+        public DackData Dack { get; set; } = new();
+        public List<TullPost> TullPoster { get; set; } = new();
+    }
+using System.Text.Json;
+
+namespace BilKoll
+{
+    public static class DataStore
+    {
+        private static readonly string FilePath =
+            Path.Combine(AppContext.BaseDirectory, "bilkoll_data.json");
+
+        public static AppData Load()
+        {
+            try
+            {
+                if (File.Exists(FilePath))
+                {
+                    string json = File.ReadAllText(FilePath);
+                    var data = JsonSerializer.Deserialize<AppData>(json);
+                    if (data != null)
+                        return data;
+                }
+            }
+            catch
+            {
+            }
+
+            return new AppData();
+        }
+
+        public static void Save(AppData data)
+        {
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            string json = JsonSerializer.Serialize(data, options);
+            File.WriteAllText(FilePath, json);
+        }
+    }
+}
+using System.Diagnostics;
+
+namespace BilKoll
+{
+    public class MainForm : Form
+    {
+        private AppData _data;
+
+        private TextBox _txtRegNr = new();
+        private NumericUpDown _numMatarstallning = new();
+        private DateTimePicker _dtpOljebyte = new();
+        private NumericUpDown _numIntervall = new();
+        private Label _lblOljeStatus = new();
+
+        private DateTimePicker _dtpDack = new();
+        private ComboBox _cmbSasong = new();
+        private Label _lblDackStatus = new();
+
+        private DateTimePicker _dtpTullDatum = new();
+        private NumericUpDown _numTullBelopp = new();
+        private TextBox _txtTullKommentar = new();
+        private ListView _lvTullPoster = new();
+        private Label _lblTullTotalt = new();
+
+        public MainForm()
+        {
+            Text = "BilKoll";
+            Width = 760;
+            Height = 560;
+            StartPosition = FormStartPosition.CenterScreen;
+
+            _data = DataStore.Load();
+
+            var tabs = new TabControl { Dock = DockStyle.Fill };
+            tabs.TabPages.Add(BuildGarageTab());
+            tabs.TabPages.Add(BuildDackTab());
+            tabs.TabPages.Add(BuildBildelarTab());
+            tabs.TabPages.Add(BuildButikerTab());
+            tabs.TabPages.Add(BuildTullTab());
+
+            Controls.Add(tabs);
+
+            LaddaGarageFalt();
+            LaddaDackFalt();
+            LaddaTullPoster();
+
+            FormClosing += (s, e) => DataStore.Save(_data);
+        }
+
+        private TabPage BuildGarageTab()
+        {
+            var page = new TabPage("Garage");
+
+            var lblRegNr = new Label { Text = "Regnummer:", Location = new Point(20, 25), AutoSize = true };
+            _txtRegNr.Location = new Point(160, 22);
+            _txtRegNr.Width = 150;
+
+            var lblMatare = new Label { Text = "Mätarställning (km):", Location = new Point(20, 60), AutoSize = true };
+            _numMatarstallning.Location = new Point(160, 57);
+            _numMatarstallning.Width = 150;
+            _numMatarstallning.Maximum = 1_000_000;
+
+            var lblOljebyte = new Label { Text = "Senaste oljebyte:", Location = new Point(20, 95), AutoSize = true };
+            _dtpOljebyte.Location = new Point(160, 92);
+            _dtpOljebyte.Width = 150;
+            _dtpOljebyte.Format = DateTimePickerFormat.Short;
+
+            var lblIntervall = new Label { Text = "Intervall (månader):", Location = new Point(20, 130), AutoSize = true };
+            _numIntervall.Location = new Point(160, 127);
+            _numIntervall.Width = 150;
+            _numIntervall.Minimum = 1;
+            _numIntervall.Maximum = 60;
+            _numIntervall.Value = 12;
+
+            var btnSpara = new Button { Text = "Spara", Location = new Point(160, 165), Width = 100 };
+            btnSpara.Click += (s, e) =>
+            {
+                SparaGarageFalt();
+                DataStore.Save(_data);
+                UppdateraOljeStatus();
+                MessageBox.Show("Garage-info sparad.", "BilKoll");
+            };
+
+            _lblOljeStatus.Location = new Point(20, 205);
+            _lblOljeStatus.AutoSize = true;
+            _lblOljeStatus.Font = new Font(Font, FontStyle.Bold);
+
+            page.Controls.AddRange(new Control[]
+            {
+                lblRegNr, _txtRegNr,
+                lblMatare, _numMatarstallning,
+                lblOljebyte, _dtpOljebyte,
+                lblIntervall, _numIntervall,
+                btnSpara,
+                _lblOljeStatus
+            });
+
+            return page;
+        }
+
+        private void LaddaGarageFalt()
+        {
+            _txtRegNr.Text = _data.Garage.RegNr;
+            _numMatarstallning.Value = Math.Min(_data.Garage.Matarstallning, _numMatarstallning.Maximum);
+            _dtpOljebyte.Value = _data.Garage.SenasteOljebyte;
+            _numIntervall.Value = _data.Garage.OljebytesIntervallManader;
+            UppdateraOljeStatus();
+        }
+
+        private void SparaGarageFalt()
+        {
+            _data.Garage.RegNr = _txtRegNr.Text.Trim();
+            _data.Garage.Matarstallning = (int)_numMatarstallning.Value;
+            _data.Garage.SenasteOljebyte = _dtpOljebyte.Value.Date;
+            _data.Garage.OljebytesIntervallManader = (int)_numIntervall.Value;
+        }
+
+        private void UppdateraOljeStatus()
+        {
+            DateTime nastaByte = _data.Garage.SenasteOljebyte.AddMonths(_data.Garage.OljebytesIntervallManader);
+            int dagarKvar = (nastaByte - DateTime.Today).Days;
+
+            if (dagarKvar < 0)
+            {
+                _lblOljeStatus.ForeColor = Color.Red;
+                _lblOljeStatus.Text = $"Dags att byta olja! ({-dagarKvar} dagar försenat)";
+            }
+            else if (dagarKvar <= 30)
+            {
+                _lblOljeStatus.ForeColor = Color.DarkOrange;
+                _lblOljeStatus.Text = $"Snart dags: {dagarKvar} dagar kvar (byt senast {nastaByte:yyyy-MM-dd})";
+            }
+            else
+            {
+                _lblOljeStatus.ForeColor = Color.DarkGreen;
+                _lblOljeStatus.Text = $"OK. Nästa oljebyte senast {nastaByte:yyyy-MM-dd} ({dagarKvar} dagar kvar)";
+            }
+        }
+
+        private TabPage BuildDackTab()
+        {
+            var page = new TabPage("Däck");
+
+            var lblSasong = new Label { Text = "Senast bytt till:", Location = new Point(20, 25), AutoSize = true };
+            _cmbSasong.Location = new Point(160, 22);
+            _cmbSasong.Width = 150;
+            _cmbSasong.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cmbSasong.Items.AddRange(new object[] { "Sommardäck", "Vinterdäck" });
+
+            var lblDatum = new Label { Text = "Bytesdatum:", Location = new Point(20, 60), AutoSize = true };
+            _dtpDack.Location = new Point(160, 57);
+            _dtpDack.Width = 150;
+            _dtpDack.Format = DateTimePickerFormat.Short;
+
+            var btnSpara = new Button { Text = "Spara", Location = new Point(160, 95), Width = 100 };
+            btnSpara.Click += (s, e) =>
+            {
+                _data.Dack.SenasteSasong = _cmbSasong.SelectedItem?.ToString() ?? "Sommardäck";
+                _data.Dack.SenasteDackbyte = _dtpDack.Value.Date;
+                DataStore.Save(_data);
+                UppdateraDackStatus();
+                MessageBox.Show("Däckinfo sparad.", "BilKoll");
+            };
+
+            _lblDackStatus.Location = new Point(20, 135);
+            _lblDackStatus.AutoSize = true;
+            _lblDackStatus.Font = new Font(Font, FontStyle.Bold);
+            _lblDackStatus.MaximumSize = new Size(650, 0);
+
+            page.Controls.AddRange(new Control[]
+            {
+                lblSasong, _cmbSasong,
+                lblDatum, _dtpDack,
+                btnSpara,
+                _lblDackStatus
+            });
+
+            return page;
+        }
+
+        private void LaddaDackFalt()
+        {
+            _cmbSasong.SelectedItem = _data.Dack.SenasteSasong;
+            if (_cmbSasong.SelectedIndex == -1) _cmbSasong.SelectedIndex = 0;
+            _dtpDack.Value = _data.Dack.SenasteDackbyte;
+            UppdateraDackStatus();
+        }
+
+        private void UppdateraDackStatus()
+        {
+            DateTime nastaByte = _data.Dack.SenasteDackbyte.AddMonths(6);
+            string motsattSasong = _data.Dack.SenasteSasong == "Sommardäck" ? "vinterdäck" : "sommardäck";
+            int dagarKvar = (nastaByte - DateTime.Today).Days;
+
+            if (dagarKvar < 0)
+            {
+                _lblDackStatus.ForeColor = Color.Red;
+                _lblDackStatus.Text = $"Dags att fundera på {motsattSasong}! (ca {nastaByte:yyyy-MM-dd} passerat)";
+            }
+            else
+            {
+                _lblDackStatus.ForeColor = Color.DarkGreen;
+                _lblDackStatus.Text = $"OK. Nästa byte (till {motsattSasong}) ungefär {nastaByte:yyyy-MM-dd}";
+            }
+        }
+
+        private TabPage BuildBildelarTab()
+        {
+            var page = new TabPage("Bildelar");
+
+            var lblRubrik = new Label
+            {
+                Text = "Snabblänkar för att hitta bildelar:",
+                Location = new Point(20, 20),
+                AutoSize = true
+            };
+            page.Controls.Add(lblRubrik);
+
+            (string Namn, string Url)[] lankar =
+            {
+                ("Motorolja - Biltema", "https://www.biltema.se/bilvard--verktyg/olja--vatskor/motorolja/"),
+                ("Bromsar - Meca", "https://www.meca.se/produkter/bromsar"),
+                ("Tändstift - Mekonomen", "https://www.mekonomen.se/"),
+                ("Reservdelar - Autodoc", "https://www.autodoc.se/"),
+            };
+
+            int y = 60;
+            foreach (var (namn, url) in lankar)
+            {
+                var link = new LinkLabel
+                {
+                    Text = namn,
+                    Location = new Point(30, y),
+                    AutoSize = true
+                };
+                link.LinkClicked += (s, e) => OppnaLank(url);
+                page.Controls.Add(link);
+                y += 30;
+            }
+
+            return page;
+        }
+
+        private TabPage BuildButikerTab()
+        {
+            var page = new TabPage("Butiker");
+
+            var lblRubrik = new Label
+            {
+                Text = "Butiker att hitta närmaste till:",
+                Location = new Point(20, 20),
+                AutoSize = true
+            };
+            page.Controls.Add(lblRubrik);
+
+            (string Namn, string Url)[] butiker =
+            {
+                ("Biltema", "https://www.biltema.se/kundservice/varuhus/"),
+                ("Meca", "https://www.meca.se/verkstadssok"),
+                ("Mekonomen", "https://www.mekonomen.se/verkstadssok"),
+                ("Autodoc (webbutik, ingen fysisk butik)", "https://www.autodoc.se/"),
+            };
+
+            int y = 60;
+            foreach (var (namn, url) in butiker)
+            {
+                var link = new LinkLabel
+                {
+                    Text = namn,
+                    Location = new Point(30, y),
+                    AutoSize = true
+                };
+                link.LinkClicked += (s, e) => OppnaLank(url);
+                page.Controls.Add(link);
+                y += 30;
+            }
+
+            return page;
+        }
+
+        private void OppnaLank(string url)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch
+            {
+                MessageBox.Show("Kunde inte öppna länken.", "BilKoll");
+            }
+        }
+
+        private TabPage BuildTullTab()
+        {
+            var page = new TabPage("Tull && GPS");
+
+            var lblInfo = new Label
+            {
+                Text = "Stockholms trängselskatt tas ut vardagar ca 06:00-18:29 (ej lördag, söndag, helgdag eller juli).",
+                Location = new Point(20, 15),
+                AutoSize = true,
+                MaximumSize = new Size(680, 0)
+            };
+
+            var lblDatum = new Label { Text = "Datum:", Location = new Point(20, 55), AutoSize = true };
+            _dtpTullDatum.Location = new Point(90, 52);
+            _dtpTullDatum.Width = 130;
+            _dtpTullDatum.Format = DateTimePickerFormat.Short;
+
+            var lblBelopp = new Label { Text = "Belopp (kr):", Location = new Point(240, 55), AutoSize = true };
+            _numTullBelopp.Location = new Point(330, 52);
+            _numTullBelopp.Width = 80;
+            _numTullBelopp.Maximum = 10000;
+            _numTullBelopp.DecimalPlaces = 0;
+
+            var lblKommentar = new Label { Text = "Kommentar:", Location = new Point(20, 90), AutoSize = true };
+            _txtTullKommentar.Location = new Point(90, 87);
+            _txtTullKommentar.Width = 320;
+
+            var btnLaggTill = new Button { Text = "Lägg till", Location = new Point(420, 85), Width = 100 };
+            btnLaggTill.Click += (s, e) =>
+            {
+                var post = new TullPost
+                {
+                    Datum = _dtpTullDatum.Value.Date,
+                    Belopp = _numTullBelopp.Value,
+                    Kommentar = _txtTullKommentar.Text.Trim()
+                };
+                _data.TullPoster.Add(post);
+                DataStore.Save(_data);
+                LaddaTullPoster();
+                _txtTullKommentar.Clear();
+            };
+
+            _lvTullPoster.Location = new Point(20, 125);
+            _lvTullPoster.Size = new Size(690, 280);
+            _lvTullPoster.View = View.Details;
+            _lvTullPoster.FullRowSelect = true;
+            _lvTullPoster.Columns.Add("Datum", 100);
+            _lvTullPoster.Columns.Add("Belopp (kr)", 100);
+            _lvTullPoster.Columns.Add("Kommentar", 400);
+
+            var btnTaBort = new Button { Text = "Ta bort vald rad", Location = new Point(20, 415), Width = 150 };
+            btnTaBort.Click += (s, e) =>
+            {
+                if (_lvTullPoster.SelectedIndices.Count == 0) return;
+                int index = _lvTullPoster.SelectedIndices[0];
+                _data.TullPoster.RemoveAt(index);
+                DataStore.Save(_data);
+                LaddaTullPoster();
+            };
+
+            _lblTullTotalt.Location = new Point(200, 420);
+            _lblTullTotalt.AutoSize = true;
+            _lblTullTotalt.Font = new Font(Font, FontStyle.Bold);
+
+            page.Controls.AddRange(new Control[]
+            {
+                lblInfo,
+                lblDatum, _dtpTullDatum,
+                lblBelopp, _numTullBelopp,
+                lblKommentar, _txtTullKommentar,
+                btnLaggTill,
+                _lvTullPoster,
+                btnTaBort,
+                _lblTullTotalt
+            });
+
+            return page;
+        }
+
+        private void LaddaTullPoster()
+        {
+            _lvTullPoster.Items.Clear();
+            decimal totalt = 0;
+
+            foreach (var post in _data.TullPoster.OrderBy(p => p.Datum))
+            {
+                var item = new ListViewItem(post.Datum.ToString("yyyy-MM-dd"));
+                item.SubItems.Add(post.Belopp.ToString("0"));
+                item.SubItems.Add(post.Kommentar);
+                _lvTullPoster.Items.Add(item);
+                totalt += post.Belopp;
+            }
+
+            _lblTullTotalt.Text = $"Totalt hittills: {totalt:0} kr";
+        }
+    }
+}
